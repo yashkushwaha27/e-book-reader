@@ -15,6 +15,198 @@ export type HtmlToPagesAsyncOptions = {
 const BLOCK_SELECTOR =
   "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, table, hr";
 
+type TocEntry = { section: string; title: string };
+
+function normalizeSpace(s: string): string {
+  return s.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function outermostAmong(elements: Element[]): Element[] {
+  return elements.filter((el) => !elements.some((o) => o !== el && o.contains(el)));
+}
+
+/** Blocks that appear in document order before the first Gutenberg-style `div.chapter`. */
+function blocksBeforeFirstChapter(body: HTMLElement): Element[] {
+  const first = body.querySelector("div.chapter");
+  if (!first) return [];
+  const all = Array.from(body.querySelectorAll(BLOCK_SELECTOR));
+  const before = all.filter(
+    (el) => first.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING,
+  );
+  return outermostAmong(before);
+}
+
+function blockMarkedForRemoval(block: Element, removeRoots: Set<Element>): boolean {
+  for (const r of removeRoots) {
+    if (r === block || r.contains(block)) return true;
+  }
+  return false;
+}
+
+function filterBlocksRemoved(blocks: Element[], removeRoots: Set<Element>): Element[] {
+  if (removeRoots.size === 0) return blocks;
+  return blocks.filter((b) => !blockMarkedForRemoval(b, removeRoots));
+}
+
+function rowsFromParagraphLinks(p: Element): TocEntry[] {
+  const rows: TocEntry[] = [];
+  for (const a of p.querySelectorAll("a")) {
+    const section = normalizeSpace(a.textContent ?? "");
+    let title = "";
+    let n: ChildNode | null = a.nextSibling;
+    while (n) {
+      if (n.nodeType === Node.ELEMENT_NODE) {
+        const el = n as Element;
+        if (el.tagName === "A") break;
+        if (el.tagName === "BR") {
+          n = n.nextSibling;
+          continue;
+        }
+      }
+      if (n.nodeType === Node.TEXT_NODE) title += n.textContent ?? "";
+      n = n.nextSibling;
+    }
+    title = normalizeSpace(title);
+    if (!section && !title) continue;
+    rows.push({ section, title });
+  }
+  return rows;
+}
+
+function findContentsHeading(body: HTMLElement): Element | null {
+  const matchesHeading = (el: Element): boolean => {
+    const t = normalizeSpace(el.textContent ?? "");
+    if (t.length > 40) return false;
+    if (/^contents$/i.test(t) || /^table of contents$/i.test(t)) return true;
+    return el.classList.contains("toc") && /contents/i.test(t);
+  };
+
+  for (const el of body.querySelectorAll("h1, h2, h3, h4, h5, p, div, span")) {
+    if (matchesHeading(el)) return el;
+  }
+  return null;
+}
+
+function isTocBoundaryElement(el: Element, firstChapter: Element | null): boolean {
+  if (firstChapter && (el === firstChapter || firstChapter.contains(el))) return true;
+  const tag = el.tagName.toLowerCase();
+  if (tag === "div" && (el as HTMLElement).classList.contains("chapter")) return true;
+  const text = normalizeSpace(el.textContent ?? "");
+  if (tag === "h2" || tag === "h3") {
+    if (/translator'?s preface/i.test(text)) return true;
+    if (/^illustrations$/i.test(text)) return true;
+  }
+  return false;
+}
+
+/**
+ * Parse Gutenberg-style TOC and collect DOM roots to strip so we don't duplicate it in the body stream.
+ */
+function extractTocFromBody(body: HTMLElement): { rows: TocEntry[]; remove: Set<Element> } {
+  const remove = new Set<Element>();
+  const heading = findContentsHeading(body);
+  if (!heading) return { rows: [], remove };
+
+  const firstChapter = body.querySelector("div.chapter");
+  const rows: TocEntry[] = [];
+
+  const blockquote = heading.closest("blockquote");
+  if (blockquote) {
+    blockquote.querySelectorAll("p").forEach((p) => {
+      rows.push(...rowsFromParagraphLinks(p));
+    });
+    if (rows.length === 0) return { rows: [], remove };
+    remove.add(blockquote);
+    return { rows, remove };
+  }
+
+  remove.add(heading);
+  let el: Element | null = heading.nextElementSibling;
+  while (el) {
+    if (isTocBoundaryElement(el, firstChapter)) break;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "h2" || tag === "h3") break;
+
+    if (tag === "p") {
+      rows.push(...rowsFromParagraphLinks(el));
+      remove.add(el);
+    } else if (tag === "div") {
+      rows.push(...rowsFromParagraphLinks(el));
+      remove.add(el);
+    } else {
+      remove.add(el);
+    }
+    el = el.nextElementSibling;
+  }
+
+  if (rows.length === 0) {
+    remove.clear();
+    return { rows: [], remove };
+  }
+  return { rows, remove };
+}
+
+async function paginateTocPages(
+  rows: TocEntry[],
+  fits: (html: string) => Promise<boolean>,
+): Promise<string[]> {
+  if (rows.length === 0) return [];
+
+  const thead =
+    "<thead><tr><th scope=\"col\">Section</th><th scope=\"col\">Title</th></tr></thead>";
+  const render = (subset: TocEntry[], isFirst: boolean) => {
+    const head = isFirst
+      ? "<h2 class=\"book-front-heading\">Contents</h2>"
+      : "<p class=\"book-contents-continued\" role=\"doc-subtitle\">Contents (continued)</p>";
+    const tbody = subset
+      .map((r) => `<tr><td>${escapeHtml(r.section)}</td><td>${escapeHtml(r.title)}</td></tr>`)
+      .join("");
+    return `${head}<table class="book-contents-table">${thead}<tbody>${tbody}</tbody></table>`;
+  };
+
+  const pages: string[] = [];
+  let bucket: TocEntry[] = [];
+  let firstChunk = true;
+
+  const flush = async () => {
+    if (bucket.length === 0) return;
+    pages.push(render(bucket, firstChunk));
+    firstChunk = false;
+    bucket = [];
+  };
+
+  for (const row of rows) {
+    const trial = render([...bucket, row], firstChunk);
+    if (await fits(trial)) {
+      bucket.push(row);
+      continue;
+    }
+    if (bucket.length > 0) {
+      await flush();
+      bucket = [row];
+      const single = render(bucket, firstChunk);
+      if (await fits(single)) continue;
+      pages.push(single);
+      firstChunk = false;
+      bucket = [];
+      continue;
+    }
+    pages.push(render([row], firstChunk));
+    firstChunk = false;
+  }
+
+  if (bucket.length > 0) pages.push(render(bucket, firstChunk));
+  return pages;
+}
+
 function createPageDiv(innerHTML: string, _globalPageIndex: number): HTMLDivElement {
   const page = document.createElement("div");
   page.className = "book-page";
@@ -352,6 +544,7 @@ function collectBlocksFromHtml(html: string): {
   blocks: Element[];
   chapterBreakAt: Set<number>;
   body: HTMLElement;
+  tocRows: TocEntry[];
 } {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
@@ -360,24 +553,35 @@ function collectBlocksFromHtml(html: string): {
   const body = doc.body;
   stripProjectGutenbergShell(body);
 
+  const { rows: tocRows, remove: tocRemove } = extractTocFromBody(body);
+  const bodyTextLen = (body.textContent ?? "").trim().length || 1;
+
   let blocks: Element[] = [];
   let chapterBreakAt = new Set<number>();
 
   const fromSections = blocksFromSections(body);
-  if (fromSections.blocks.length > 0) {
-    blocks = fromSections.blocks;
+  const sectionTextLen = fromSections.blocks.reduce((n, b) => n + (b.textContent?.length ?? 0), 0);
+  const sectionsLookComplete =
+    fromSections.blocks.length > 0 && sectionTextLen >= bodyTextLen * 0.08;
+
+  if (sectionsLookComplete) {
+    blocks = filterBlocksRemoved(fromSections.blocks, tocRemove);
     chapterBreakAt = fromSections.chapterBreakAt;
   } else {
     const fromChapters = blocksFromChapters(body);
     if (fromChapters.blocks.length > 0) {
-      blocks = fromChapters.blocks;
-      chapterBreakAt = fromChapters.chapterBreakAt;
+      const prefix = filterBlocksRemoved(blocksBeforeFirstChapter(body), tocRemove);
+      const ch = fromChapters.blocks;
+      const p = prefix.length;
+      blocks = [...prefix, ...ch];
+      chapterBreakAt = new Set([...fromChapters.chapterBreakAt].map((i) => i + p));
+      if (p > 0) chapterBreakAt.add(p);
     } else {
-      blocks = blocksFromBody(body);
+      blocks = filterBlocksRemoved(blocksFromBody(body), tocRemove);
     }
   }
 
-  return { blocks, chapterBreakAt, body };
+  return { blocks, chapterBreakAt, body, tocRows };
 }
 
 /**
@@ -390,7 +594,7 @@ export async function htmlToPageElements(
   fit?: PageFitOptions,
   asyncOpts?: HtmlToPagesAsyncOptions,
 ): Promise<HTMLDivElement[]> {
-  const { blocks, chapterBreakAt, body } = collectBlocksFromHtml(html);
+  const { blocks, chapterBreakAt, body, tocRows } = collectBlocksFromHtml(html);
 
   if (blocks.length === 0) {
     const fallback = body.innerHTML.trim() || "<p>No readable content.</p>";
@@ -399,7 +603,16 @@ export async function htmlToPageElements(
 
   if (!fit) {
     const joined = blocks.map((b) => b.outerHTML).join("");
-    return [createPageDiv(joined.slice(0, 14000), 0)];
+    const tocJoined =
+      tocRows.length > 0
+        ? `<h2 class="book-front-heading">Contents</h2><table class="book-contents-table"><tbody>${tocRows
+            .map(
+              (r) =>
+                `<tr><td>${escapeHtml(r.section)}</td><td>${escapeHtml(r.title)}</td></tr>`,
+            )
+            .join("")}</tbody></table>`
+        : "";
+    return [createPageDiv((tocJoined + joined).slice(0, 14000), 0)];
   }
 
   const yieldEvery = asyncOpts?.yieldEvery ?? 48;
@@ -407,7 +620,9 @@ export async function htmlToPageElements(
   const fits = wrapFitsWithYields(syncFits, yieldEvery);
 
   try {
-    const htmlPages = await paginateBlocks(blocks, fits, chapterBreakAt, yieldEvery);
+    const tocPages = await paginateTocPages(tocRows, fits);
+    const mainPages = await paginateBlocks(blocks, fits, chapterBreakAt, yieldEvery);
+    const htmlPages = [...tocPages, ...mainPages];
     return htmlPages.map((h, i) => createPageDiv(h, i));
   } finally {
     cleanup();

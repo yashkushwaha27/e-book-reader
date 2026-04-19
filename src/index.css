@@ -49,7 +49,7 @@ html {
   background-color: #12100e;
   background-image:
     linear-gradient(to bottom, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.32)),
-    url("/background.avif");
+    var(--app-bg-image, url("/background.avif"));
   background-size: cover;
   background-position: center top;
   background-repeat: no-repeat;

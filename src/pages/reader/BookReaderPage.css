@@ -431,6 +431,52 @@
   font-size: calc(11px * var(--reader-font-scale, 1));
 }
 
+.reader-measure-host .book-page .book-front-heading {
+  margin: 0 0 0.45em;
+  font-size: 1.1em;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--reader-ink);
+}
+
+.reader-measure-host .book-page .book-contents-continued {
+  margin: 0 0 0.35em;
+  font-size: 0.95em;
+  font-weight: 600;
+  text-align: center;
+  color: var(--reader-ink);
+  opacity: 0.85;
+}
+
+.reader-measure-host .book-page .book-contents-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  line-height: 1.35;
+  color: var(--reader-ink);
+}
+
+.reader-measure-host .book-page .book-contents-table th,
+.reader-measure-host .book-page .book-contents-table td {
+  vertical-align: top;
+  padding: 0.2em 0.45em 0.25em 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--reader-ink) 18%, transparent);
+  text-align: left;
+  font-weight: 400;
+}
+
+.reader-measure-host .book-page .book-contents-table th {
+  font-weight: 700;
+  font-size: 0.88em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom-color: color-mix(in srgb, var(--reader-ink) 35%, transparent);
+}
+
+.reader-measure-host .book-page .book-contents-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .reader-flip-mount {
   --reader-flip-scale: 1;
   width: 100%;
@@ -572,6 +618,52 @@
   padding: 0.1em 0.3em;
   border-radius: 4px;
   background: color-mix(in srgb, var(--reader-paper) 65%, rgba(0, 0, 0, 0.06));
+}
+
+.reader-flip-mount .book-page .book-front-heading {
+  margin: 0 0 0.45em;
+  font-size: 1.1em;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--reader-ink);
+}
+
+.reader-flip-mount .book-page .book-contents-continued {
+  margin: 0 0 0.35em;
+  font-size: 0.95em;
+  font-weight: 600;
+  text-align: center;
+  color: var(--reader-ink);
+  opacity: 0.85;
+}
+
+.reader-flip-mount .book-page .book-contents-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  line-height: 1.35;
+  color: var(--reader-ink);
+}
+
+.reader-flip-mount .book-page .book-contents-table th,
+.reader-flip-mount .book-page .book-contents-table td {
+  vertical-align: top;
+  padding: 0.2em 0.45em 0.25em 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--reader-ink) 18%, transparent);
+  text-align: left;
+  font-weight: 400;
+}
+
+.reader-flip-mount .book-page .book-contents-table th {
+  font-weight: 700;
+  font-size: 0.88em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom-color: color-mix(in srgb, var(--reader-ink) 35%, transparent);
+}
+
+.reader-flip-mount .book-page .book-contents-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .reader-footer {

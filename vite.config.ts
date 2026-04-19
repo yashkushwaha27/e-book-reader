@@ -5,6 +5,21 @@ import { defineConfig, type Plugin } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * GitHub Pages project sites are served from `https://<user>.github.io/<repo>/`.
+ * User/organization sites using a `<user>.github.io` repository are served from `/`.
+ */
+function githubPagesBase(): string {
+  const explicit = process.env.VITE_BASE_PATH?.trim();
+  if (explicit) {
+    return explicit.endsWith("/") ? explicit : `${explicit}/`;
+  }
+  const repo = process.env.GITHUB_REPOSITORY?.split("/")?.[1];
+  if (!repo) return "/";
+  if (repo.endsWith(".github.io")) return "/";
+  return `/${repo}/`;
+}
+
 function gdriveHtmlProxy(): Plugin {
   return {
     name: "gdrive-html-proxy",
@@ -42,6 +57,7 @@ function gdriveHtmlProxy(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: githubPagesBase(),
   plugins: [react(), gdriveHtmlProxy()],
   server: {
     proxy: {
