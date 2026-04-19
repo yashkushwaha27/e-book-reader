@@ -1,5 +1,6 @@
 import type { BookEntry } from "../data/books";
 import { resolveBookFetchUrl } from "../data/books";
+import { getOfflineBookHtml } from "./offlineBookStorage";
 
 const GUTENBERG_PREFIX = "https://www.gutenberg.org/";
 
@@ -27,11 +28,7 @@ function gutenbergProxyUrls(canonical: string): string[] {
   return list;
 }
 
-/**
- * Load book HTML in the browser. Production Gutenberg URLs use a fallback chain of
- * public CORS proxies (Codetabs first); set `VITE_GUTENBERG_PROXY_PREFIX` to prefer your own.
- */
-export async function fetchBookHtmlText(book: BookEntry): Promise<string> {
+async function fetchBookHtmlFromNetwork(book: BookEntry): Promise<string> {
   if (!isProdGutenberg(book)) {
     const res = await fetch(resolveBookFetchUrl(book));
     if (!res.ok) {
@@ -67,4 +64,29 @@ export async function fetchBookHtmlText(book: BookEntry): Promise<string> {
       "Could not load this Gutenberg title from any CORS proxy. Host your own proxy (see VITE_GUTENBERG_PROXY_PREFIX) or mirror the HTML.",
     )
   );
+}
+
+/**
+ * Load book HTML in the browser. Production Gutenberg URLs use a fallback chain of
+ * public CORS proxies (Codetabs first); set `VITE_GUTENBERG_PROXY_PREFIX` to prefer your own.
+ * When offline (or the network fails), returns a copy previously saved with "Save for offline".
+ */
+export async function fetchBookHtmlText(book: BookEntry): Promise<string> {
+  const loadFromOffline = () => getOfflineBookHtml(book.id);
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    const cached = await loadFromOffline();
+    if (cached) return cached;
+    throw new Error(
+      "You’re offline. Open this book once while online and use “Save for offline”, then you can read without a connection.",
+    );
+  }
+
+  try {
+    return await fetchBookHtmlFromNetwork(book);
+  } catch (err) {
+    const cached = await loadFromOffline();
+    if (cached) return cached;
+    throw err;
+  }
 }

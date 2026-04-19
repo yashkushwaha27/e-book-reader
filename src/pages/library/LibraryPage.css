@@ -371,6 +371,33 @@
   gap: 0.5rem;
 }
 
+.library-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.library-card-title-row .library-card-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-card-offline-pill {
+  flex-shrink: 0;
+  margin-top: 0.12rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding: 0.22rem 0.5rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--accent-border);
+  background: color-mix(in srgb, var(--accent-bg) 50%, transparent);
+  line-height: 1.2;
+}
+
 .library-card-title {
   margin: 0;
   font-size: 1.2rem;

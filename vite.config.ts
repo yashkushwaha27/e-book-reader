@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig, type Plugin } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,9 +57,55 @@ function gdriveHtmlProxy(): Plugin {
 }
 
 // https://vite.dev/config/
+const base = githubPagesBase();
+
 export default defineConfig({
-  base: githubPagesBase(),
-  plugins: [react(), gdriveHtmlProxy()],
+  base,
+  plugins: [
+    react(),
+    gdriveHtmlProxy(),
+    VitePWA({
+      registerType: "autoUpdate",
+      includeAssets: ["favicon.svg", "background.avif"],
+      manifest: {
+        name: "Shelf & Reader",
+        short_name: "Shelf",
+        description: "Classic books with a page-turning reader. Save titles for offline reading.",
+        theme_color: "#1a1510",
+        background_color: "#0f0c09",
+        display: "standalone",
+        orientation: "any",
+        start_url: base,
+        scope: base,
+        icons: [
+          {
+            src: `${base}favicon.svg`,
+            type: "image/svg+xml",
+            sizes: "any",
+            purpose: "any",
+          },
+        ],
+      },
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,svg,ico,avif,woff2}"],
+        navigateFallback: `${base}index.html`,
+        navigateFallbackDenylist: [/^\/api/],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "google-fonts",
+              expiration: {
+                maxEntries: 16,
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+              },
+            },
+          },
+        ],
+      },
+    }),
+  ],
   server: {
     proxy: {
       "/gutenberg-proxy": {

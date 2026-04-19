@@ -8,6 +8,7 @@ import { htmlToPageElements } from "../../lib/htmlToPages";
 import { addBookmark, getBookmarkIndices, removeBookmark } from "../../lib/readerBookmarks";
 import { recordRecentBook } from "../../lib/recentlyRead";
 import { getResumeTargetFaceIndex, shouldOfferResumePrompt } from "../../lib/readerResume";
+import { isBookSavedOffline, saveOfflineBook } from "../../lib/offlineBookStorage";
 import { getReadingPosition, setReadingPosition } from "../../lib/readerProgress";
 import { ROUTES } from "../../routes/routes.constants";
 import "./BookReaderPage.css";
@@ -159,6 +160,12 @@ export function BookReaderPage() {
     const b = getBookById(bookId);
     return b ? shouldOfferResumePrompt(b.id) : false;
   });
+  const [offlineSaved, setOfflineSaved] = useState(false);
+  const [saveOfflineBusy, setSaveOfflineBusy] = useState(false);
+  const [saveOfflineHint, setSaveOfflineHint] = useState("");
+  const [netOnline, setNetOnline] = useState(() =>
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
 
   const book = getBookById(bookId);
 
@@ -178,6 +185,35 @@ export function BookReaderPage() {
     resumeFromStartRef.current = false;
     setResumePromptOpen(shouldOfferResumePrompt(book.id));
   }, [book?.id]);
+
+  useEffect(() => {
+    if (!book?.id) {
+      setOfflineSaved(false);
+      return;
+    }
+    let cancelled = false;
+    void isBookSavedOffline(book.id).then((saved) => {
+      if (!cancelled) setOfflineSaved(saved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [book?.id]);
+
+  useEffect(() => {
+    setSaveOfflineHint("");
+  }, [book?.id]);
+
+  useEffect(() => {
+    const onOnline = () => setNetOnline(true);
+    const onOffline = () => setNetOnline(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -599,6 +635,30 @@ export function BookReaderPage() {
     [book?.id],
   );
 
+  const handleSaveOffline = useCallback(async () => {
+    if (!book) return;
+    const cached = htmlCacheRef.current;
+    if (!cached || cached.bookId !== book.id) {
+      setSaveOfflineHint("Finish loading the book, then try again.");
+      return;
+    }
+    setSaveOfflineBusy(true);
+    setSaveOfflineHint("");
+    try {
+      await saveOfflineBook({
+        bookId: book.id,
+        title: book.title,
+        html: cached.html,
+      });
+      setOfflineSaved(true);
+      setSaveOfflineHint("Saved — you can read this title without internet.");
+    } catch (err) {
+      setSaveOfflineHint(err instanceof Error ? err.message : "Could not save for offline.");
+    } finally {
+      setSaveOfflineBusy(false);
+    }
+  }, [book]);
+
   const shellClass =
     skin === "sepia"
       ? "reader-shell reader-shell--sepia"
@@ -622,11 +682,50 @@ export function BookReaderPage() {
             <h1 className="reader-title">Missing book</h1>
           )}
           <div className="reader-toolbar-meta">
+            {!netOnline ? (
+              <span className="reader-offline-badge" title="Network unavailable">
+                Offline
+              </span>
+            ) : null}
             <span className="reader-page-badge" aria-live="polite">
               Page {resumePromptOpen ? "— / —" : pageLabel}
             </span>
+            {book && !resumePromptOpen && status === "ready" ? (
+              offlineSaved ? (
+                <span className="reader-offline-saved" title="HTML is stored on this device">
+                  Saved offline
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="reader-save-offline-btn"
+                  onClick={handleSaveOffline}
+                  disabled={saveOfflineBusy || !netOnline}
+                  title={
+                    netOnline
+                      ? "Store this book on your device for reading without internet"
+                      : "Connect to the internet once to download and save"
+                  }
+                >
+                  {saveOfflineBusy ? "Saving…" : "Save for offline"}
+                </button>
+              )
+            ) : null}
           </div>
         </div>
+
+        {!netOnline ? (
+          <p className="reader-banner reader-banner--offline">
+            You’re offline. Books you’ve saved for offline still open; reconnect to download new
+            titles.
+          </p>
+        ) : null}
+
+        {saveOfflineHint ? (
+          <p className="reader-offline-hint" role="status">
+            {saveOfflineHint}
+          </p>
+        ) : null}
 
         {book && bookNeedsDriveProxyNote(book) ? (
           <p className="reader-banner">
@@ -664,7 +763,9 @@ export function BookReaderPage() {
                     <div className="reader-loading-book" aria-hidden />
                     <p className="reader-loading-text">
                       {loadingPhase === "fetch"
-                        ? "Downloading book…"
+                        ? typeof navigator !== "undefined" && !navigator.onLine
+                          ? "Opening saved copy…"
+                          : "Downloading book…"
                         : loadingPhase === "paginate"
                           ? "Preparing pages…"
                           : "Loading…"}

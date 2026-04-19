@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import type { BookEntry } from "../../data/books";
 import { BOOK_CATALOG } from "../../data/books";
+import { listOfflineBookIds } from "../../lib/offlineBookStorage";
 import { ROUTES } from "../../routes/routes.constants";
 import "./LibraryPage.css";
 
@@ -53,7 +54,18 @@ function LibraryCardDescription({
 export function LibraryPage() {
   const [query, setQuery] = useState("");
   const [descriptionModalBook, setDescriptionModalBook] = useState<BookEntry | null>(null);
+  const [offlineIds, setOfflineIds] = useState<Set<string>>(new Set());
   const modalCloseRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listOfflineBookIds().then((ids) => {
+      if (!cancelled) setOfflineIds(new Set(ids));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = normalize(query);
@@ -131,9 +143,16 @@ export function LibraryPage() {
                 <div className="library-card-inner">
                   <span className="library-card-spine" aria-hidden />
                   <div className="library-card-body">
-                    <h2 id={`lib-card-title-${book.id}`} className="library-card-title">
-                      {book.title}
-                    </h2>
+                    <div className="library-card-title-row">
+                      <h2 id={`lib-card-title-${book.id}`} className="library-card-title">
+                        {book.title}
+                      </h2>
+                      {offlineIds.has(book.id) ? (
+                        <span className="library-card-offline-pill" title="Saved on this device for offline reading">
+                          Offline
+                        </span>
+                      ) : null}
+                    </div>
                     <LibraryCardDescription book={book} onReadMore={setDescriptionModalBook} />
                   </div>
                   <div className="library-card-footer">
