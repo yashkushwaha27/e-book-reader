@@ -1,7 +1,8 @@
 import { PageFlip } from "page-flip";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { bookNeedsDriveProxyNote, getBookById, resolveBookFetchUrl } from "../../data/books";
+import { bookNeedsDriveProxyNote, getBookById } from "../../data/books";
+import { fetchBookHtmlText } from "../../lib/fetchBookHtml";
 import { htmlToPageElements } from "../../lib/htmlToPages";
 import { addBookmark, getBookmarkIndices, removeBookmark } from "../../lib/readerBookmarks";
 import { ROUTES } from "../../routes/routes.constants";
@@ -241,12 +242,7 @@ export function BookReaderPage() {
         if (cacheHit && htmlCacheRef.current) {
           html = htmlCacheRef.current.html;
         } else {
-          const url = resolveBookFetchUrl(book);
-          const res = await fetch(url);
-          if (!res.ok) {
-            throw new Error(`Could not download HTML (HTTP ${res.status}).`);
-          }
-          html = await res.text();
+          html = await fetchBookHtmlText(book);
           htmlCacheRef.current = { bookId: book.id, html };
         }
 

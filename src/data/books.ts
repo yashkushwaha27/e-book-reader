@@ -63,23 +63,15 @@ export function getBookById(id: string | undefined): BookEntry | undefined {
 }
 
 /**
- * Dev: Vite proxies same-origin `/gutenberg-proxy/*` → gutenberg.org (see `vite.config.ts`).
- * Prod (e.g. GitHub Pages): gutenberg.org does not send CORS headers, so the browser must
- * load HTML via a public fetch proxy unless you set `VITE_GUTENBERG_PROXY_PREFIX`.
+ * Dev: Vite proxies `/gutenberg-proxy/*` → gutenberg.org. Prod: returns the real URL;
+ * `fetchBookHtml` runs a CORS proxy chain for Gutenberg on static hosts.
  */
 function resolveGutenbergHtmlFetchUrl(url: string): string {
   if (!url.startsWith(GUTENBERG_ORIGIN)) return url;
-
   if (import.meta.env.DEV) {
     return `/gutenberg-proxy${url.slice(GUTENBERG_ORIGIN.length)}`;
   }
-
-  const customPrefix = import.meta.env.VITE_GUTENBERG_PROXY_PREFIX?.trim();
-  if (customPrefix) {
-    return `${customPrefix}${encodeURIComponent(url)}`;
-  }
-
-  return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  return url;
 }
 
 export function resolveBookFetchUrl(book: BookEntry): string {
