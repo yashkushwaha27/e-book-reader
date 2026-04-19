@@ -43,16 +43,25 @@
   }
 }
 
+html {
+  min-height: 100%;
+  min-height: 100dvh;
+  background-color: #12100e;
+  background-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.32)),
+    url("/background.avif");
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+  /* `scroll` avoids blank/white backgrounds with `fixed` on many mobile browsers */
+  background-attachment: scroll;
+}
+
 body {
   margin: 0;
   min-height: 100svh;
-  background-color: #030303;
-  background-image:
-    radial-gradient(ellipse 80% 55% at 50% -15%, var(--glow-1), transparent 50%),
-    radial-gradient(ellipse 50% 40% at 100% 30%, var(--glow-2), transparent 45%),
-    radial-gradient(ellipse 45% 35% at 0% 85%, var(--glow-3), transparent 42%),
-    linear-gradient(180deg, #050505 0%, #030303 45%, #080808 100%);
-  background-attachment: fixed;
+  min-height: 100dvh;
+  background: transparent;
 }
 
 #root {
@@ -60,7 +69,9 @@ body {
   max-width: 100%;
   margin: 0;
   min-height: 100svh;
+  min-height: 100dvh;
   box-sizing: border-box;
+  background: transparent;
 }
 
 h1,

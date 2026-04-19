@@ -22,6 +22,13 @@ declare module "page-flip" {
     /** Replace HTML pages while keeping the current index (matches library `PageFlip.updateFromHtml`). */
     updateFromHtml(pages: HTMLElement[]): void;
     destroy(): void;
+    /** Same as `getRender().getRect()` — book layout in block coordinates. */
+    getBoundsRect(): PageFlipRect;
+    /**
+     * Low-level flip from a point in the same coordinate system as mouse events
+     * (block-relative; see `getBoundsRect().left` / `.top`).
+     */
+    getFlipController(): { flip(point: { x: number; y: number }): void };
     flipNext(corner?: PageFlipCorner): void;
     flipPrev(corner?: PageFlipCorner): void;
     turnToNextPage(): void;

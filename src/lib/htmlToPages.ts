@@ -7,6 +7,11 @@ export type PageFitOptions = {
   fontScale?: number;
 };
 
+export type HtmlToPagesAsyncOptions = {
+  /** Call `scheduler.yield` / `setTimeout(0)` every N `fits` evaluations (0 = never). */
+  yieldEvery?: number;
+};
+
 const BLOCK_SELECTOR =
   "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, table, hr";
 
@@ -96,7 +101,46 @@ function createMeasurer(fit: PageFitOptions): { fits: (html: string) => boolean;
   };
 }
 
-function splitTextIntoWrappers(text: string, fits: (html: string) => boolean, tag: string): string[] {
+function cooperativeYield(): Promise<void> {
+  const sched = (globalThis as unknown as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (sched?.yield) return sched.yield();
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+function wrapFitsWithYields(
+  syncFits: (html: string) => boolean,
+  yieldEvery: number,
+): (html: string) => Promise<boolean> {
+  if (yieldEvery <= 0) {
+    return async (html: string) => syncFits(html);
+  }
+  let n = 0;
+  return async (html: string) => {
+    n += 1;
+    if (n % yieldEvery === 0) {
+      await cooperativeYield();
+    }
+    return syncFits(html);
+  };
+}
+
+/** Tokens: word + following spaces, or whitespace run (for odd markup). */
+function tokenizeWithWhitespace(s: string): string[] {
+  return s.match(/\S+\s*|\s+/g) ?? [];
+}
+
+/**
+ * Split plain-text (or inline HTML) into tag-wrapped chunks that each fit the page.
+ * Uses word-aligned prefixes with binary search over token counts, with a char fallback
+ * for tokens longer than one line.
+ */
+async function splitTextIntoWrappers(
+  text: string,
+  fits: (html: string) => Promise<boolean>,
+  tag: string,
+): Promise<string[]> {
   const open = `<${tag}>`;
   const close = `</${tag}>`;
   const pieces: string[] = [];
@@ -104,24 +148,65 @@ function splitTextIntoWrappers(text: string, fits: (html: string) => boolean, ta
   if (!rest.length) return pieces;
 
   while (rest.length > 0) {
+    const tokens = tokenizeWithWhitespace(rest);
+    if (tokens.length === 0) break;
+
     let lo = 1;
-    let hi = rest.length;
-    let best = 1;
+    let hi = tokens.length;
+    let best = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      const chunk = rest.slice(0, mid);
-      if (fits(`${open}${chunk}${close}`)) {
+      const chunk = tokens.slice(0, mid).join("");
+      if (await fits(`${open}${chunk}${close}`)) {
         best = mid;
         lo = mid + 1;
       } else {
         hi = mid - 1;
       }
     }
-    if (best < 1) best = 1;
-    pieces.push(`${open}${rest.slice(0, best)}${close}`);
-    rest = rest.slice(best).trimStart();
+
+    if (best === 0) {
+      const firstTok = tokens[0];
+      const wordMatch = firstTok.match(/^(\S+)(\s*)$/);
+      const word = wordMatch ? wordMatch[1] : firstTok.trim();
+      const spAfter = wordMatch ? wordMatch[2] : "";
+
+      if (!word.length) {
+        rest = rest.slice(firstTok.length).trimStart();
+        continue;
+      }
+
+      let loC = 1;
+      let hiC = word.length;
+      let bestC = 1;
+      while (loC <= hiC) {
+        const mid = (loC + hiC) >> 1;
+        if (await fits(`${open}${word.slice(0, mid)}${close}`)) {
+          bestC = mid;
+          loC = mid + 1;
+        } else {
+          hiC = mid - 1;
+        }
+      }
+
+      pieces.push(`${open}${word.slice(0, bestC)}${close}`);
+      rest = (word.slice(bestC) + spAfter + rest.slice(firstTok.length)).trimStart();
+      continue;
+    }
+
+    const chunk = tokens.slice(0, best).join("");
+    pieces.push(`${open}${chunk}${close}`);
+    rest = rest.slice(chunk.length).trimStart();
   }
+
   return pieces;
+}
+
+/** Parse a single root element wrapper without DOMParser when structure is simple. */
+function parseSingleTagWrapper(html: string): { tag: string; inner: string } | null {
+  const m = html.match(/^<([a-zA-Z][\w:-]*)[^>]*>([\s\S]*)<\/\1>\s*$/);
+  if (!m) return null;
+  return { tag: m[1].toLowerCase(), inner: m[2] };
 }
 
 /** Typical Gutenberg / novel headings — start on a fresh page when possible. */
@@ -136,16 +221,26 @@ function isChapterHeading(el: Element): boolean {
   return false;
 }
 
-function splitBlockToFitPieces(outerHtml: string, fits: (html: string) => boolean): string[] {
-  const wrapped = `<div id="split-root">${outerHtml}</div>`;
-  const doc = new DOMParser().parseFromString(wrapped, "text/html");
-  const el = doc.getElementById("split-root")?.firstElementChild;
-  if (!el) return fits(outerHtml) ? [outerHtml] : [`<p>${outerHtml}</p>`];
+async function splitBlockToFitPieces(
+  outerHtml: string,
+  fits: (html: string) => Promise<boolean>,
+): Promise<string[]> {
+  let parsed = parseSingleTagWrapper(outerHtml.trim());
+  if (!parsed) {
+    const wrapped = `<div id="split-root">${outerHtml}</div>`;
+    const doc = new DOMParser().parseFromString(wrapped, "text/html");
+    const el = doc.getElementById("split-root")?.firstElementChild;
+    if (el) {
+      parsed = { tag: el.tagName.toLowerCase(), inner: el.innerHTML };
+    }
+  }
+  if (!parsed) {
+    return (await fits(outerHtml)) ? [outerHtml] : [`<p>${outerHtml}</p>`];
+  }
 
-  if (fits(outerHtml)) return [outerHtml];
+  if (await fits(outerHtml)) return [outerHtml];
 
-  const tag = el.tagName.toLowerCase();
-  const inner = el.innerHTML;
+  const { tag, inner } = parsed;
 
   if (tag === "pre") {
     return splitTextIntoWrappers(inner, fits, "pre");
@@ -159,7 +254,7 @@ function splitBlockToFitPieces(outerHtml: string, fits: (html: string) => boolea
     return splitTextIntoWrappers(inner, fits, tag);
   }
 
-  const text = el.textContent?.trim() ?? "";
+  const text = inner.replace(/<[^>]+>/g, "").trim();
   if (text.length) {
     return splitTextIntoWrappers(text, fits, "p");
   }
@@ -167,11 +262,12 @@ function splitBlockToFitPieces(outerHtml: string, fits: (html: string) => boolea
   return [outerHtml];
 }
 
-function paginateBlocks(
+async function paginateBlocks(
   blocks: Element[],
-  fits: (html: string) => boolean,
+  fits: (html: string) => Promise<boolean>,
   chapterBreakAt: Set<number>,
-): string[] {
+  yieldEvery: number,
+): Promise<string[]> {
   const pages: string[] = [];
   let bucket: string[] = [];
 
@@ -184,6 +280,10 @@ function paginateBlocks(
   };
 
   for (let i = 0; i < blocks.length; i++) {
+    if (yieldEvery > 0 && i > 0 && i % 40 === 0) {
+      await cooperativeYield();
+    }
+
     const block = blocks[i];
     const forceNewPage =
       bucket.length > 0 && (chapterBreakAt.has(i) || isChapterHeading(block));
@@ -194,7 +294,7 @@ function paginateBlocks(
     const outer = block.outerHTML;
     const trial = bucket.length ? currentHtml() + outer : outer;
 
-    if (fits(trial)) {
+    if (await fits(trial)) {
       bucket.push(outer);
       continue;
     }
@@ -203,34 +303,33 @@ function paginateBlocks(
       flush();
     }
 
-    if (fits(outer)) {
+    if (await fits(outer)) {
       bucket.push(outer);
       continue;
     }
 
-    const pieces = splitBlockToFitPieces(outer, fits);
+    const pieces = await splitBlockToFitPieces(outer, fits);
     for (const piece of pieces) {
       const trial2 = bucket.length ? currentHtml() + piece : piece;
-      if (fits(trial2)) {
+      if (await fits(trial2)) {
         bucket.push(piece);
         continue;
       }
 
       flush();
 
-      if (fits(piece)) {
+      if (await fits(piece)) {
         bucket.push(piece);
         continue;
       }
 
-      const wrapDoc = new DOMParser().parseFromString(piece, "text/html");
-      const wrapEl = wrapDoc.body.firstElementChild;
-      const tag = wrapEl?.tagName.toLowerCase() ?? "p";
-      const innerOnly = wrapEl?.innerHTML ?? piece;
-      const micro = splitTextIntoWrappers(innerOnly, fits, tag);
+      const wrap = parseSingleTagWrapper(piece.trim());
+      const tag = wrap?.tag ?? "p";
+      const innerOnly = wrap?.inner ?? piece;
+      const micro = await splitTextIntoWrappers(innerOnly, fits, tag);
       for (const m of micro) {
         const trial3 = bucket.length ? currentHtml() + m : m;
-        if (fits(trial3)) {
+        if (await fits(trial3)) {
           bucket.push(m);
         } else {
           flush();
@@ -249,12 +348,11 @@ function paginateBlocks(
   return pages;
 }
 
-/**
- * Turn fetched book HTML into discrete page elements for StPageFlip.
- * With `fit`, packs real block nodes into pages using off-screen measurement so each
- * face matches the pixel size of `.book-page` in the reader.
- */
-export function htmlToPageElements(html: string, fit?: PageFitOptions): HTMLDivElement[] {
+function collectBlocksFromHtml(html: string): {
+  blocks: Element[];
+  chapterBreakAt: Set<number>;
+  body: HTMLElement;
+} {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   doc.querySelectorAll("script").forEach((el) => el.remove());
@@ -279,6 +377,21 @@ export function htmlToPageElements(html: string, fit?: PageFitOptions): HTMLDivE
     }
   }
 
+  return { blocks, chapterBreakAt, body };
+}
+
+/**
+ * Turn fetched book HTML into discrete page elements for StPageFlip.
+ * With `fit`, packs real block nodes into pages using off-screen measurement so each
+ * face matches the pixel size of `.book-page` in the reader.
+ */
+export async function htmlToPageElements(
+  html: string,
+  fit?: PageFitOptions,
+  asyncOpts?: HtmlToPagesAsyncOptions,
+): Promise<HTMLDivElement[]> {
+  const { blocks, chapterBreakAt, body } = collectBlocksFromHtml(html);
+
   if (blocks.length === 0) {
     const fallback = body.innerHTML.trim() || "<p>No readable content.</p>";
     return [createPageDiv(fallback, 0)];
@@ -289,9 +402,12 @@ export function htmlToPageElements(html: string, fit?: PageFitOptions): HTMLDivE
     return [createPageDiv(joined.slice(0, 14000), 0)];
   }
 
-  const { fits, cleanup } = createMeasurer(fit);
+  const yieldEvery = asyncOpts?.yieldEvery ?? 48;
+  const { fits: syncFits, cleanup } = createMeasurer(fit);
+  const fits = wrapFitsWithYields(syncFits, yieldEvery);
+
   try {
-    const htmlPages = paginateBlocks(blocks, fits, chapterBreakAt);
+    const htmlPages = await paginateBlocks(blocks, fits, chapterBreakAt, yieldEvery);
     return htmlPages.map((h, i) => createPageDiv(h, i));
   } finally {
     cleanup();
