@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>A Quiet Demo</title>
+  </head>
+  <body>
+    <section>
+      <h1>A Quiet Demo</h1>
+      <p>
+        This is a bundled HTML book. Each top-level <code>section</code> in the body
+        becomes one spread-friendly page in the reader.
+      </p>
+    </section>
+    <section>
+      <h2>Chapter II — Turning</h2>
+      <p>
+        Use the <strong>Next page</strong> control (or drag a corner) to move forward
+        with the page-flip animation powered by StPageFlip.
+      </p>
+    </section>
+    <section>
+      <h2>Chapter III — Your shelf</h2>
+      <p>
+        Add entries in <code>src/data/books.ts</code>. Point <code>htmlUrl</code> at
+        static files under <code>public/books/</code> or at any URL that allows your
+        origin to fetch HTML.
+      </p>
+    </section>
+    <section>
+      <h2>Chapter IV — Google Drive</h2>
+      <p>
+        For Drive-hosted HTML, set <code>gdriveFileId</code> on a catalog row. While
+        you run <code>yarn dev</code>, Vite proxies that file so the reader can load it
+        without browser CORS blocking the request.
+      </p>
+    </section>
+  </body>
+</html>
