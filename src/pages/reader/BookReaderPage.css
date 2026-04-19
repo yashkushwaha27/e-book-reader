@@ -871,6 +871,96 @@
   border: 1px solid var(--border);
 }
 
+.reader-resume-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(3, 3, 5, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.reader-resume-modal {
+  width: min(100%, 22rem);
+  padding: 1.35rem 1.4rem 1.45rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.reader-resume-title {
+  margin: 0 0 0.65rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--text-h);
+}
+
+.reader-resume-lede {
+  margin: 0 0 1.15rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.reader-resume-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.reader-resume-btn {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.72rem 1rem;
+  border-radius: var(--radius-full);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    filter 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.reader-resume-btn--primary {
+  color: #14120f;
+  background: linear-gradient(180deg, var(--accent-hover) 0%, var(--accent) 100%);
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.reader-resume-btn--primary:hover {
+  filter: brightness(1.05);
+}
+
+.reader-resume-btn--secondary {
+  color: var(--text-h);
+  background: color-mix(in srgb, var(--surface-solid) 92%, var(--accent-bg));
+  border-color: var(--border-strong);
+}
+
+.reader-resume-btn--secondary:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-bg) 40%, var(--surface-solid));
+}
+
+.reader-resume-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .reader-shell--contrast .reader-flip-mount .book-page code {
   background: #1f1f22;
 }

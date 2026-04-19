@@ -1,10 +1,14 @@
 import { PageFlip } from "page-flip";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { bookNeedsDriveProxyNote, getBookById } from "../../data/books";
 import { fetchBookHtmlText } from "../../lib/fetchBookHtml";
 import { htmlToPageElements } from "../../lib/htmlToPages";
 import { addBookmark, getBookmarkIndices, removeBookmark } from "../../lib/readerBookmarks";
+import { recordRecentBook } from "../../lib/recentlyRead";
+import { getResumeTargetFaceIndex, shouldOfferResumePrompt } from "../../lib/readerResume";
+import { getReadingPosition, setReadingPosition } from "../../lib/readerProgress";
 import { ROUTES } from "../../routes/routes.constants";
 import "./BookReaderPage.css";
 
@@ -139,6 +143,9 @@ export function BookReaderPage() {
   /** Mirrors last PageFlip `usePortrait` so page labels match spread vs single-page mode. */
   const flipPortraitRef = useRef(true);
   const flipNavFallbackRef = useRef<number | undefined>(undefined);
+  const readingSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const queueSaveReadingPositionRef = useRef<() => void>(() => {});
+  const resumeFromStartRef = useRef(false);
 
   const [status, setStatus] = useState<ReaderStatus>("loading");
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(null);
@@ -148,6 +155,10 @@ export function BookReaderPage() {
   const [jumpInput, setJumpInput] = useState("");
   const [jumpHint, setJumpHint] = useState("");
   const [bookmarks, setBookmarks] = useState<number[]>([]);
+  const [resumePromptOpen, setResumePromptOpen] = useState(() => {
+    const b = getBookById(bookId);
+    return b ? shouldOfferResumePrompt(b.id) : false;
+  });
 
   const book = getBookById(bookId);
 
@@ -157,6 +168,15 @@ export function BookReaderPage() {
     } else {
       setBookmarks([]);
     }
+  }, [book?.id]);
+
+  useEffect(() => {
+    if (!book) {
+      setResumePromptOpen(false);
+      return;
+    }
+    resumeFromStartRef.current = false;
+    setResumePromptOpen(shouldOfferResumePrompt(book.id));
   }, [book?.id]);
 
   useEffect(() => {
@@ -187,6 +207,52 @@ export function BookReaderPage() {
     });
   }, [syncPageLabel]);
 
+  const queueSaveReadingPosition = useCallback(() => {
+    if (!book?.id) return;
+    window.clearTimeout(readingSaveTimerRef.current);
+    readingSaveTimerRef.current = window.setTimeout(() => {
+      const pf = flipRef.current;
+      if (!pf || !book?.id) return;
+      const total = pf.getPageCount();
+      if (total < 1) return;
+      const face = canonicalBookmarkFaceIndex(
+        pf.getCurrentPageIndex(),
+        flipPortraitRef.current,
+        total,
+      );
+      setReadingPosition(book.id, face);
+    }, 380);
+  }, [book?.id]);
+
+  queueSaveReadingPositionRef.current = queueSaveReadingPosition;
+
+  const flushSaveReadingPosition = useCallback(() => {
+    if (!book?.id) return;
+    window.clearTimeout(readingSaveTimerRef.current);
+    const pf = flipRef.current;
+    if (!pf || status !== "ready") return;
+    const total = pf.getPageCount();
+    if (total < 1) return;
+    const face = canonicalBookmarkFaceIndex(
+      pf.getCurrentPageIndex(),
+      flipPortraitRef.current,
+      total,
+    );
+    setReadingPosition(book.id, face);
+  }, [book?.id, status]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushSaveReadingPosition();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flushSaveReadingPosition);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flushSaveReadingPosition);
+    };
+  }, [flushSaveReadingPosition]);
+
   useEffect(() => {
     const mount = mountRef.current;
     const stage = stageRef.current;
@@ -200,6 +266,13 @@ export function BookReaderPage() {
       setStatus("error");
       setErrorText("That title is not in the catalog yet.");
       return;
+    }
+
+    if (resumePromptOpen) {
+      setStatus("loading");
+      setLoadingPhase(null);
+      setErrorText("");
+      return () => {};
     }
 
     lastLayoutKeyRef.current = null;
@@ -305,6 +378,7 @@ export function BookReaderPage() {
         flipRef.current = pf;
         pf.on("flip", () => {
           syncAfterFlip();
+          queueSaveReadingPositionRef.current();
         });
 
         await waitAnimationFrames(3);
@@ -360,9 +434,19 @@ export function BookReaderPage() {
           portrait: stage.clientWidth < PORTRAIT_BREAKPOINT_PX,
         };
 
+        const totalPages = pf.getPageCount();
+        if (!resumeFromStartRef.current && totalPages > 0) {
+          const target = getResumeTargetFaceIndex(book.id);
+          if (target !== null) {
+            const clamped = Math.min(Math.max(0, target), totalPages - 1);
+            pf.turnToPage(clamped);
+          }
+        }
+
         syncPageLabel();
         setLoadingPhase(null);
         setStatus("ready");
+        recordRecentBook(book.id);
       } catch (err) {
         if (cancelled || generation !== runGenerationRef.current) return;
         flipRef.current?.destroy();
@@ -412,6 +496,7 @@ export function BookReaderPage() {
       cancelled = true;
       runGenerationRef.current += 1;
       window.clearTimeout(debounceTimer);
+      window.clearTimeout(readingSaveTimerRef.current);
       if (flipNavFallbackRef.current !== undefined) {
         window.clearTimeout(flipNavFallbackRef.current);
         flipNavFallbackRef.current = undefined;
@@ -421,7 +506,7 @@ export function BookReaderPage() {
       flipRef.current = null;
       mount.innerHTML = "";
     };
-  }, [book, bookId, syncPageLabel, syncAfterFlip]);
+  }, [book, bookId, resumePromptOpen, syncPageLabel, syncAfterFlip]);
 
   const handleNext = useCallback(() => {
     const pf = flipRef.current;
@@ -440,6 +525,7 @@ export function BookReaderPage() {
         cur.turnToNextPage();
         syncAfterFlip();
       }
+      queueSaveReadingPositionRef.current();
     }, FLIP_FALLBACK_AFTER_MS);
   }, [status, syncAfterFlip]);
 
@@ -460,6 +546,7 @@ export function BookReaderPage() {
         cur.turnToPrevPage();
         syncAfterFlip();
       }
+      queueSaveReadingPositionRef.current();
     }, FLIP_FALLBACK_AFTER_MS);
   }, [status, syncAfterFlip]);
 
@@ -476,7 +563,8 @@ export function BookReaderPage() {
     setJumpHint("");
     pf.turnToPage(n - 1);
     syncAfterFlip();
-  }, [jumpInput, status, syncAfterFlip]);
+    queueSaveReadingPosition();
+  }, [jumpInput, status, syncAfterFlip, queueSaveReadingPosition]);
 
   const handleBookmarkPage = useCallback(() => {
     const pf = flipRef.current;
@@ -486,6 +574,7 @@ export function BookReaderPage() {
     const face = canonicalBookmarkFaceIndex(idx, flipPortraitRef.current, total);
     setBookmarks(addBookmark(book.id, face));
     setJumpHint("");
+    setReadingPosition(book.id, face);
   }, [book?.id, status]);
 
   const handleGoToBookmark = useCallback(
@@ -496,8 +585,9 @@ export function BookReaderPage() {
       if (pageIndex < 0 || pageIndex >= total) return;
       pf.turnToPage(pageIndex);
       syncAfterFlip();
+      queueSaveReadingPosition();
     },
-    [status, syncAfterFlip],
+    [status, syncAfterFlip, queueSaveReadingPosition],
   );
 
   const handleRemoveBookmark = useCallback(
@@ -533,7 +623,7 @@ export function BookReaderPage() {
           )}
           <div className="reader-toolbar-meta">
             <span className="reader-page-badge" aria-live="polite">
-              Page {pageLabel}
+              Page {resumePromptOpen ? "— / —" : pageLabel}
             </span>
           </div>
         </div>
@@ -557,12 +647,18 @@ export function BookReaderPage() {
           <div className="reader-book-board">
             <div className="reader-book-rim" />
             <div className="reader-stage-wrap">
-              <div ref={stageRef} className="reader-stage" aria-busy={status === "loading"}>
+              <div
+                ref={stageRef}
+                className="reader-stage"
+                aria-busy={status === "loading" && !resumePromptOpen}
+              >
                 <div
                   className={
-                    status === "loading" ? "reader-loading reader-loading--visible" : "reader-loading"
+                    status === "loading" && !resumePromptOpen
+                      ? "reader-loading reader-loading--visible"
+                      : "reader-loading"
                   }
-                  aria-hidden={status !== "loading"}
+                  aria-hidden={status !== "loading" || resumePromptOpen}
                 >
                   <div className="reader-loading-inner">
                     <div className="reader-loading-book" aria-hidden />
@@ -591,14 +687,19 @@ export function BookReaderPage() {
 
         <footer className="reader-footer">
           <div className="reader-controls">
-            <button type="button" className="reader-btn" onClick={handlePrev} disabled={status !== "ready"}>
+            <button
+              type="button"
+              className="reader-btn"
+              onClick={handlePrev}
+              disabled={status !== "ready" || resumePromptOpen}
+            >
               Previous page
             </button>
             <button
               type="button"
               className="reader-btn reader-btn-accent"
               onClick={handleNext}
-              disabled={status !== "ready"}
+              disabled={status !== "ready" || resumePromptOpen}
             >
               Next page
             </button>
@@ -628,10 +729,14 @@ export function BookReaderPage() {
                   setJumpInput(e.target.value);
                   setJumpHint("");
                 }}
-                disabled={status !== "ready" || pageCount === 0}
+                disabled={status !== "ready" || pageCount === 0 || resumePromptOpen}
                 aria-describedby={jumpHint ? "reader-jump-hint" : undefined}
               />
-              <button type="submit" className="reader-btn" disabled={status !== "ready" || pageCount === 0}>
+              <button
+                type="submit"
+                className="reader-btn"
+                disabled={status !== "ready" || pageCount === 0 || resumePromptOpen}
+              >
                 Go
               </button>
             </form>
@@ -640,7 +745,7 @@ export function BookReaderPage() {
               type="button"
               className="reader-btn reader-btn-bookmark"
               onClick={handleBookmarkPage}
-              disabled={status !== "ready"}
+              disabled={status !== "ready" || resumePromptOpen}
             >
               Bookmark this page
             </button>
@@ -685,6 +790,64 @@ export function BookReaderPage() {
           ) : null}
         </footer>
       </div>
+
+      {book && resumePromptOpen
+        ? createPortal(
+            <div
+              className="reader-resume-backdrop"
+              role="presentation"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="reader-resume-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="reader-resume-title"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 id="reader-resume-title" className="reader-resume-title">
+                  How would you like to read?
+                </h2>
+                <p className="reader-resume-lede">
+                  {(() => {
+                    const n = getBookmarkIndices(book.id).length;
+                    const pos = getReadingPosition(book.id);
+                    const parts: string[] = [];
+                    if (n > 0) parts.push(`${n} saved bookmark${n === 1 ? "" : "s"}`);
+                    if (pos !== null && pos > 0) {
+                      parts.push(`last session around page ${pos + 1}`);
+                    }
+                    return parts.length > 0 ? parts.join(" · ") : "You have saved progress for this title.";
+                  })()}
+                </p>
+                <div className="reader-resume-actions">
+                  <button
+                    type="button"
+                    className="reader-resume-btn reader-resume-btn--primary"
+                    onClick={() => {
+                      resumeFromStartRef.current = false;
+                      setResumePromptOpen(false);
+                    }}
+                  >
+                    Continue
+                  </button>
+                  <button
+                    type="button"
+                    className="reader-resume-btn reader-resume-btn--secondary"
+                    onClick={() => {
+                      resumeFromStartRef.current = true;
+                      setReadingPosition(book.id, 0);
+                      setResumePromptOpen(false);
+                    }}
+                  >
+                    Start from the beginning
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
