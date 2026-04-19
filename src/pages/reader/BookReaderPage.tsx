@@ -1,12 +1,7 @@
 import { PageFlip } from "page-flip";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import {
-  bookNeedsDriveProxyNote,
-  bookNeedsRemoteFetchProxyNote,
-  getBookById,
-  resolveBookFetchUrl,
-} from "../../data/books";
+import { bookNeedsDriveProxyNote, getBookById, resolveBookFetchUrl } from "../../data/books";
 import { htmlToPageElements } from "../../lib/htmlToPages";
 import { addBookmark, getBookmarkIndices, removeBookmark } from "../../lib/readerBookmarks";
 import { ROUTES } from "../../routes/routes.constants";
@@ -554,14 +549,6 @@ export function BookReaderPage() {
           </p>
         ) : null}
 
-        {book && bookNeedsRemoteFetchProxyNote(book) && !bookNeedsDriveProxyNote(book) ? (
-          <p className="reader-banner">
-            This title loads from Project Gutenberg. For production builds, add the same
-            kind of host proxy you use in dev (
-            <code className="reader-inline-code">/gutenberg-proxy</code>) on your server,
-            or mirror the HTML where your app can fetch it.
-          </p>
-        ) : null}
 
         {status === "error" ? (
           <p className="reader-error" role="alert">

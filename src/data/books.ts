@@ -62,12 +62,24 @@ export function getBookById(id: string | undefined): BookEntry | undefined {
   return byId.get(id);
 }
 
-function rewriteGutenbergUrlForDev(url: string): string {
-  if (!import.meta.env.DEV) return url;
-  if (url.startsWith(GUTENBERG_ORIGIN)) {
+/**
+ * Dev: Vite proxies same-origin `/gutenberg-proxy/*` → gutenberg.org (see `vite.config.ts`).
+ * Prod (e.g. GitHub Pages): gutenberg.org does not send CORS headers, so the browser must
+ * load HTML via a public fetch proxy unless you set `VITE_GUTENBERG_PROXY_PREFIX`.
+ */
+function resolveGutenbergHtmlFetchUrl(url: string): string {
+  if (!url.startsWith(GUTENBERG_ORIGIN)) return url;
+
+  if (import.meta.env.DEV) {
     return `/gutenberg-proxy${url.slice(GUTENBERG_ORIGIN.length)}`;
   }
-  return url;
+
+  const customPrefix = import.meta.env.VITE_GUTENBERG_PROXY_PREFIX?.trim();
+  if (customPrefix) {
+    return `${customPrefix}${encodeURIComponent(url)}`;
+  }
+
+  return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
 }
 
 export function resolveBookFetchUrl(book: BookEntry): string {
@@ -79,16 +91,15 @@ export function resolveBookFetchUrl(book: BookEntry): string {
     }
     return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
   }
-  return rewriteGutenbergUrlForDev(book.htmlUrl);
+  return resolveGutenbergHtmlFetchUrl(book.htmlUrl);
 }
 
 export function bookNeedsDriveProxyNote(book: BookEntry): boolean {
   return Boolean(book.gdriveFileId?.trim()) && !import.meta.env.DEV;
 }
 
-/** Drive or Gutenberg (and similar) URLs need a dev-style proxy in production static hosts. */
+/** Production Drive fetches still need your own proxy or CORS-enabled URL. */
 export function bookNeedsRemoteFetchProxyNote(book: BookEntry): boolean {
   if (import.meta.env.DEV) return false;
-  if (book.gdriveFileId?.trim()) return true;
-  return book.htmlUrl.includes("www.gutenberg.org");
+  return Boolean(book.gdriveFileId?.trim());
 }
