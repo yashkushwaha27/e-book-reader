@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import type { BookEntry } from "../../data/books";
 import { BOOK_CATALOG } from "../../data/books";
-import { listOfflineBookIds } from "../../lib/offlineBookStorage";
+import { listOfflineBookIds } from "../../utils/offlineBookStorage";
 import { ROUTES } from "../../routes/routes.constants";
 import "./LibraryPage.css";
 
@@ -114,12 +114,11 @@ export function LibraryPage() {
             autoComplete="off"
           />
         </label>
-        {/* <p className="library-browse-hint">
-          Click a book card to start reading.{" "}
-          <Link className="library-inline-link" to={ROUTES.TEMPLATES}>
-            Templates &amp; remote sources
+        <p className="library-browse-hint">
+          <Link className="library-inline-link" to={ROUTES.OFFLINE_DATA}>
+            Saved books
           </Link>
-        </p> */}
+        </p>
       </section>
 
       {filtered.length === 0 ? (

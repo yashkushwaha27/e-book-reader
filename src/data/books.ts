@@ -1,4 +1,4 @@
-import { extractGoogleDriveFileId } from "../lib/drive";
+import { extractGoogleDriveFileId } from "../utils/drive";
 
 const GUTENBERG_ORIGIN = "https://www.gutenberg.org";
 

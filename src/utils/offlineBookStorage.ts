@@ -69,3 +69,27 @@ export async function listOfflineBookIds(): Promise<string[]> {
   const store = tx.objectStore(STORE);
   return reqDone(store.getAllKeys() as IDBRequest<string[]>);
 }
+
+/** Deletes one book's offline copy by id. */
+export async function removeOfflineBook(bookId: string): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(bookId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+  });
+}
+
+/** Removes every stored book HTML entry. Does not affect the service-worker shell cache. */
+export async function clearAllOfflineBooks(): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+  });
+}

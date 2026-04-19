@@ -11,7 +11,7 @@ A mobile-first progressive web app (PWA) for reading classic literature with a r
 - **Reading Progress** — persists last-read page per book via `localStorage`
 - **Bookmarks** — add/remove bookmarks on any page; jump directly from the toolbar
 - **Resume Prompt** — on re-open, asks "Continue" or "Start from beginning"
-- **Offline Reading** — save any book to `IndexedDB` for reading without network
+- **Offline Reading** — save any book to `IndexedDB` for reading without network; clear saved copies from **Offline books** (`/offline-data`)
 - **Three Reader Skins** — Classic (cream), Sepia (golden), High Contrast (dark)
 - **Full-Text Search** — filters the book catalog by title or description in real time
 - **Progressive Web App** — installable, offline-capable service worker via `vite-plugin-pwa`
@@ -29,6 +29,7 @@ A mobile-first progressive web app (PWA) for reading classic literature with a r
 | Routing | React Router 7 |
 | Page Animation | page-flip 2.0.7 |
 | PWA | vite-plugin-pwa + Workbox |
+| Notifications | react-toastify |
 | Date Formatting | moment.js 2.30 |
 | Storage | localStorage (progress, bookmarks) + IndexedDB (offline HTML) |
 | Styling | Pure CSS with CSS custom properties |
@@ -75,7 +76,7 @@ e-book-reader/
 │   ├── hooks/
 │   │   └── useDesktopWebBlock.ts  # Returns true when viewport is desktop-width
 │   │
-│   ├── lib/                       # Pure utility modules (no React)
+│   ├── utils/                     # Pure utility modules (no React)
 │   │   ├── fetchBookHtml.ts       # Fetch HTML with CORS proxy fallback chain
 │   │   ├── htmlToPages.ts         # Paginate HTML into fixed-height .book-page divs
 │   │   ├── offlineBookStorage.ts  # IndexedDB read/write for offline books
@@ -92,6 +93,9 @@ e-book-reader/
 │   │   ├── library/
 │   │   │   ├── LibraryPage.tsx    # Searchable book grid + description modal
 │   │   │   └── LibraryPage.css
+│   │   ├── offline/
+│   │   │   ├── OfflineDataPage.tsx # Manage offline book HTML (IndexedDB)
+│   │   │   └── OfflineDataPage.css
 │   │   ├── reader/
 │   │   │   ├── BookReaderPage.tsx # Full-featured page-flip reader (~955 lines)
 │   │   │   └── BookReaderPage.css
@@ -127,6 +131,7 @@ e-book-reader/
 | `/library` | `LibraryPage` | Full book catalog with search |
 | `/read/:bookId` | `BookReaderPage` | Page-flip reader for a specific book |
 | `/templates` | `TemplatesPage` | Reader skin gallery + Google Drive guide |
+| `/offline-data` | `OfflineDataPage` | List books saved for offline reading; clear IndexedDB copies |
 
 ---
 
@@ -134,7 +139,7 @@ e-book-reader/
 
 ### `src/main.tsx`
 
-The React entry point. Calls `ReactDOM.createRoot` on `#root` and renders `<App />` inside `<StrictMode>`.
+The React entry point. Calls `ReactDOM.createRoot` on `#root` and renders `<App />` inside `<StrictMode>`, plus a global [`react-toastify`](https://www.npmjs.com/package/react-toastify) `<ToastContainer />` for success, info, warning, and error messages (offline save feedback, page-jump validation, book load failures, clearing offline storage). Styling lives in `index.css` under `.app-toast*`.
 
 ---
 
@@ -181,7 +186,7 @@ Current catalog:
 
 ---
 
-### `src/lib/fetchBookHtml.ts`
+### `src/utils/fetchBookHtml.ts`
 
 Fetches a book's HTML with a cascading fallback strategy:
 
@@ -199,7 +204,7 @@ This ensures books load across different hosting environments and network condit
 
 ---
 
-### `src/lib/htmlToPages.ts`
+### `src/utils/htmlToPages.ts`
 
 The most complex module (~630 lines). Converts a raw HTML string into an array of `HTMLDivElement` elements, each representing exactly one book page.
 
@@ -216,20 +221,24 @@ The most complex module (~630 lines). Converts a raw HTML string into an array o
 
 ---
 
-### `src/lib/offlineBookStorage.ts`
+### `src/utils/offlineBookStorage.ts`
 
 Wraps the browser's `IndexedDB` API with promise-based helpers. Uses database `e-book-reader-offline`, object store `books`.
 
 | Function | Description |
 |---|---|
-| `saveOfflineBook(bookId, title, html)` | Persist HTML to IndexedDB |
+| `saveOfflineBook({ bookId, title, html })` | Persist HTML to IndexedDB |
 | `getOfflineBookHtml(bookId)` | Retrieve saved HTML or `null` |
 | `isBookSavedOffline(bookId)` | Boolean check without fetching full HTML |
 | `listOfflineBookIds()` | Array of all saved book IDs |
+| `removeOfflineBook(bookId)` | Delete one book’s offline HTML |
+| `clearAllOfflineBooks()` | Delete every stored book record (does not clear the PWA precache) |
+
+**Managing storage:** Users can open **Library → “Saved books & offline storage”** (`/offline-data`) to see which titles are stored on the device, remove them individually, or use **Remove all saved books** when at least one title exists. That only clears **offline book HTML** in IndexedDB; the **service worker** cache for JS/CSS/shell assets is managed separately by the browser when new builds are deployed.
 
 ---
 
-### `src/lib/readerProgress.ts`
+### `src/utils/readerProgress.ts`
 
 Stores and retrieves reading position (page index) per book using `localStorage` key `reading-position.v1`.
 
@@ -241,7 +250,7 @@ Stores and retrieves reading position (page index) per book using `localStorage`
 
 ---
 
-### `src/lib/readerBookmarks.ts`
+### `src/utils/readerBookmarks.ts`
 
 Manages an array of bookmarked page indices per book under `localStorage` key `bookmarks.v1`.
 
@@ -255,13 +264,13 @@ Manages an array of bookmarked page indices per book under `localStorage` key `b
 
 ---
 
-### `src/lib/recentlyRead.ts`
+### `src/utils/recentlyRead.ts`
 
 Tracks the last 8 books opened with timestamps in `localStorage`. Includes a migration from v1 (plain array) to v2 (timestamped objects).
 
 ---
 
-### `src/lib/drive.ts`
+### `src/utils/drive.ts`
 
 Utilities for Google Drive integration:
 
@@ -295,17 +304,7 @@ Activated via query param `?skin=sepia` or `?skin=contrast`. Default is classic.
 /read/crime-and-punishment?skin=contrast
 ```
 
-**Key state variables:**
-
-| State | Purpose |
-|---|---|
-| `pages` | Array of paginated `HTMLDivElement` |
-| `currentPage` | 0-based page index currently shown |
-| `bookmarks` | Array of bookmarked page indices |
-| `isOffline` | Network status from `navigator.onLine` |
-| `isBookSaved` | Whether the current book is in IndexedDB |
-| `showResumePrompt` | Whether to show Continue/Restart dialog |
-| `skin` | Active reader skin name |
+**Key state:** Reading chrome uses `status` (`loading` | `ready` | `error`), `bookmarks`, `resumePromptOpen`, `netOnline`, `offlineSaved`, and URL-driven `skin`. User-visible alerts (missing book, failed fetch, bad “Go to page” input, save-for-offline result) go through **react-toastify** (`toast.*`) configured in `main.tsx`.
 
 ---
 

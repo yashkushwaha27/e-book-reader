@@ -148,17 +148,6 @@
   background: color-mix(in srgb, var(--warning, #b45309) 8%, var(--surface-solid));
 }
 
-.reader-offline-hint {
-  margin: 0 0 0.75rem;
-  padding: 0.55rem 0.85rem;
-  border-radius: var(--radius-sm);
-  text-align: left;
-  font-size: 0.88rem;
-  color: var(--text-h);
-  background: color-mix(in srgb, var(--accent-bg) 40%, var(--surface-solid));
-  border: 1px solid var(--border);
-}
-
 .reader-page-badge {
   display: inline-block;
   font-size: 0.8rem;
@@ -183,16 +172,6 @@
   text-align: left;
   font-size: 0.92rem;
   line-height: 1.55;
-}
-
-.reader-error {
-  margin: 0 0 1rem;
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid #f97316;
-  background: color-mix(in srgb, #f97316 10%, var(--surface-solid));
-  color: var(--text-h);
-  text-align: left;
 }
 
 /* Leather-like case + spine */
@@ -914,14 +893,6 @@
 .reader-bookmark-remove:hover {
   color: var(--text-h);
   background: color-mix(in srgb, var(--text-h) 8%, transparent);
-}
-
-.reader-jump-hint {
-  margin: 0 auto 0.65rem;
-  max-width: 44rem;
-  font-size: 0.86rem;
-  color: #ea580c;
-  text-align: center;
 }
 
 .reader-hint {

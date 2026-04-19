@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { BOOK_CATALOG } from "../../data/books";
-import { formatRecentReadTime } from "../../lib/formatRecentReadTime";
-import { getRecentlyReadEntries } from "../../lib/recentlyRead";
+import { formatRecentReadTime } from "../../utils/formatRecentReadTime";
+import { getRecentlyReadEntries } from "../../utils/recentlyRead";
 import { ROUTES } from "../../routes/routes.constants";
 import "../library/LibraryPage.css";
 

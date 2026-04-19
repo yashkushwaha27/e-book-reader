@@ -2,14 +2,15 @@ import { PageFlip } from "page-flip";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "react-toastify";
 import { bookNeedsDriveProxyNote, getBookById } from "../../data/books";
-import { fetchBookHtmlText } from "../../lib/fetchBookHtml";
-import { htmlToPageElements } from "../../lib/htmlToPages";
-import { addBookmark, getBookmarkIndices, removeBookmark } from "../../lib/readerBookmarks";
-import { recordRecentBook } from "../../lib/recentlyRead";
-import { getResumeTargetFaceIndex, shouldOfferResumePrompt } from "../../lib/readerResume";
-import { isBookSavedOffline, saveOfflineBook } from "../../lib/offlineBookStorage";
-import { getReadingPosition, setReadingPosition } from "../../lib/readerProgress";
+import { fetchBookHtmlText } from "../../utils/fetchBookHtml";
+import { htmlToPageElements } from "../../utils/htmlToPages";
+import { addBookmark, getBookmarkIndices, removeBookmark } from "../../utils/readerBookmarks";
+import { recordRecentBook } from "../../utils/recentlyRead";
+import { getResumeTargetFaceIndex, shouldOfferResumePrompt } from "../../utils/readerResume";
+import { isBookSavedOffline, saveOfflineBook } from "../../utils/offlineBookStorage";
+import { getReadingPosition, setReadingPosition } from "../../utils/readerProgress";
 import { ROUTES } from "../../routes/routes.constants";
 import "./BookReaderPage.css";
 
@@ -150,11 +151,9 @@ export function BookReaderPage() {
 
   const [status, setStatus] = useState<ReaderStatus>("loading");
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(null);
-  const [errorText, setErrorText] = useState("");
   const [pageLabel, setPageLabel] = useState("— / —");
   const [pageCount, setPageCount] = useState(0);
   const [jumpInput, setJumpInput] = useState("");
-  const [jumpHint, setJumpHint] = useState("");
   const [bookmarks, setBookmarks] = useState<number[]>([]);
   const [resumePromptOpen, setResumePromptOpen] = useState(() => {
     const b = getBookById(bookId);
@@ -162,7 +161,6 @@ export function BookReaderPage() {
   });
   const [offlineSaved, setOfflineSaved] = useState(false);
   const [saveOfflineBusy, setSaveOfflineBusy] = useState(false);
-  const [saveOfflineHint, setSaveOfflineHint] = useState("");
   const [netOnline, setNetOnline] = useState(() =>
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
@@ -198,10 +196,6 @@ export function BookReaderPage() {
     return () => {
       cancelled = true;
     };
-  }, [book?.id]);
-
-  useEffect(() => {
-    setSaveOfflineHint("");
   }, [book?.id]);
 
   useEffect(() => {
@@ -300,14 +294,13 @@ export function BookReaderPage() {
 
     if (!book || !bookId) {
       setStatus("error");
-      setErrorText("That title is not in the catalog yet.");
+      toast.error("That title is not in the catalog yet.", { toastId: "reader-missing-book" });
       return;
     }
 
     if (resumePromptOpen) {
       setStatus("loading");
       setLoadingPhase(null);
-      setErrorText("");
       return () => {};
     }
 
@@ -343,7 +336,6 @@ export function BookReaderPage() {
 
       const cacheHit = htmlCacheRef.current?.bookId === book.id;
       setStatus("loading");
-      setErrorText("");
       setLoadingPhase(cacheHit ? "paginate" : "fetch");
 
       try {
@@ -493,7 +485,11 @@ export function BookReaderPage() {
         }
         setLoadingPhase(null);
         setStatus("error");
-        setErrorText(err instanceof Error ? err.message : "Failed to open book.");
+        const msg = err instanceof Error ? err.message : "Failed to open book.";
+        toast.error(msg, {
+          toastId: `reader-load-${book.id}`,
+          autoClose: 8000,
+        });
       } finally {
         layoutInProgressRef.current = false;
       }
@@ -593,10 +589,9 @@ export function BookReaderPage() {
     const raw = jumpInput.trim();
     const n = Number.parseInt(raw, 10);
     if (!Number.isFinite(n) || n < 1 || n > total) {
-      setJumpHint(`Enter a page from 1 to ${total}.`);
+      toast.warning(`Enter a page from 1 to ${total}.`, { toastId: "reader-jump-invalid" });
       return;
     }
-    setJumpHint("");
     pf.turnToPage(n - 1);
     syncAfterFlip();
     queueSaveReadingPosition();
@@ -609,7 +604,6 @@ export function BookReaderPage() {
     const total = pf.getPageCount();
     const face = canonicalBookmarkFaceIndex(idx, flipPortraitRef.current, total);
     setBookmarks(addBookmark(book.id, face));
-    setJumpHint("");
     setReadingPosition(book.id, face);
   }, [book?.id, status]);
 
@@ -639,11 +633,10 @@ export function BookReaderPage() {
     if (!book) return;
     const cached = htmlCacheRef.current;
     if (!cached || cached.bookId !== book.id) {
-      setSaveOfflineHint("Finish loading the book, then try again.");
+      toast.info("Finish loading the book, then try again.", { toastId: "reader-save-offline-wait" });
       return;
     }
     setSaveOfflineBusy(true);
-    setSaveOfflineHint("");
     try {
       await saveOfflineBook({
         bookId: book.id,
@@ -651,9 +644,13 @@ export function BookReaderPage() {
         html: cached.html,
       });
       setOfflineSaved(true);
-      setSaveOfflineHint("Saved — you can read this title without internet.");
+      toast.success("Saved — you can read this title without internet.", {
+        toastId: `reader-offline-saved-${book.id}`,
+      });
     } catch (err) {
-      setSaveOfflineHint(err instanceof Error ? err.message : "Could not save for offline.");
+      toast.error(err instanceof Error ? err.message : "Could not save for offline.", {
+        toastId: `reader-offline-err-${book.id}`,
+      });
     } finally {
       setSaveOfflineBusy(false);
     }
@@ -721,12 +718,6 @@ export function BookReaderPage() {
           </p>
         ) : null}
 
-        {saveOfflineHint ? (
-          <p className="reader-offline-hint" role="status">
-            {saveOfflineHint}
-          </p>
-        ) : null}
-
         {book && bookNeedsDriveProxyNote(book) ? (
           <p className="reader-banner">
             This title loads from Google Drive. Outside the dev server, configure a proxy
@@ -734,12 +725,6 @@ export function BookReaderPage() {
           </p>
         ) : null}
 
-
-        {status === "error" ? (
-          <p className="reader-error" role="alert">
-            {errorText}
-          </p>
-        ) : null}
 
         <div className="reader-book-outer" aria-label="Book">
           <div className="reader-book-spine" aria-hidden />
@@ -828,10 +813,8 @@ export function BookReaderPage() {
                 value={jumpInput}
                 onChange={(e) => {
                   setJumpInput(e.target.value);
-                  setJumpHint("");
                 }}
                 disabled={status !== "ready" || pageCount === 0 || resumePromptOpen}
-                aria-describedby={jumpHint ? "reader-jump-hint" : undefined}
               />
               <button
                 type="submit"
@@ -882,12 +865,6 @@ export function BookReaderPage() {
                 </div>
               ) : null}
             </div>
-          ) : null}
-
-          {jumpHint ? (
-            <p id="reader-jump-hint" className="reader-jump-hint" role="status">
-              {jumpHint}
-            </p>
           ) : null}
         </footer>
       </div>

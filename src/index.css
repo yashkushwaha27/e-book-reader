@@ -104,3 +104,46 @@ a {
   background: var(--accent-bg);
   color: var(--text-h);
 }
+
+/* react-toastify — match app chrome */
+.app-toast-container.Toastify__toast-container {
+  top: max(1rem, env(safe-area-inset-top, 0px));
+  padding-inline: 0.75rem;
+  width: min(100% - 1.5rem, 420px);
+}
+
+.app-toast.Toastify__toast {
+  font-family: var(--font-ui);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-solid);
+  color: var(--text-h);
+  box-shadow: var(--shadow-lg);
+  padding: 0.65rem 0.85rem;
+  min-height: unset;
+  margin-bottom: 0.5rem;
+}
+
+.app-toast.Toastify__toast .Toastify__toast-body {
+  padding: 0.15rem 0.25rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.Toastify__toast-icon {
+  margin-inline-end: 0.65rem;
+}
+
+.Toastify__progress-bar {
+  height: 3px;
+}
+
+.Toastify__close-button {
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.Toastify__close-button:hover {
+  color: var(--text-h);
+  opacity: 1;
+}
